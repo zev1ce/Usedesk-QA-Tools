@@ -109,7 +109,6 @@ function hasPermissionForUrl(url) {
     // Проверяем, соответствует ли домен нашему разрешению
     return urlObj.hostname.endsWith('.usedesk.ru');
   } catch (e) {
-    console.error('Ошибка при проверке разрешений URL:', e);
     return false;
   }
 }
@@ -120,7 +119,6 @@ function changeFavicon(tabId, url) {
   
   // Проверяем разрешения перед попыткой внедрения
   if (!hasPermissionForUrl(url)) {
-    console.log(`Нет разрешения для изменения favicon на: ${url}`);
     return;
   }
   
@@ -131,7 +129,6 @@ function changeFavicon(tabId, url) {
   for (const domain in settings.faviconMappings) {
     if (url.startsWith(domain)) {
       faviconPath = settings.faviconMappings[domain];
-      console.log(`Найдено соответствие для URL ${url}, использую фавикон: ${faviconPath}`);
       break;
     }
   }
@@ -141,14 +138,11 @@ function changeFavicon(tabId, url) {
     try {
       // Получаем полный URL к локальному файлу в расширении
       const newFaviconUrl = chrome.runtime.getURL(faviconPath);
-      console.log(`Полный URL фавикона: ${newFaviconUrl}`);
       
       // Используем chrome.scripting.executeScript для внедрения скрипта
       chrome.scripting.executeScript({
         target: { tabId },
         func: function(iconUrl) {
-          console.log('Запущен скрипт замены фавикона');
-          
           // Функция для повторных попыток замены
           function tryReplaceFavicon() {
             try {
@@ -164,9 +158,8 @@ function changeFavicon(tabId, url) {
               
               // Добавляем элемент в head
               document.head.appendChild(link);
-              console.log('Фавикон успешно заменен на:', iconUrl);
             } catch (err) {
-              console.error('Ошибка при замене фавикона:', err);
+              // Ошибка при замене фавикона
             }
           }
           
@@ -176,10 +169,10 @@ function changeFavicon(tabId, url) {
         },
         args: [newFaviconUrl]
       }).catch(err => {
-        console.error('Ошибка при выполнении скрипта:', err);
+        // Ошибка при выполнении скрипта
       });
     } catch (err) {
-      console.error('Общая ошибка в changeFavicon:', err);
+      // Общая ошибка в changeFavicon
     }
   }
 }
@@ -210,7 +203,6 @@ function shouldAddReactToggle(url) {
     
     return hasMatchingPattern;
   } catch (e) {
-    console.error('Ошибка при проверке URL:', e);
     return false;
   }
 }
@@ -225,7 +217,6 @@ function addReactToggleToUrl(url) {
     
     return urlObj.href;
   } catch (e) {
-    console.error('Ошибка при модификации URL:', e);
     return url;
   }
 }
@@ -237,13 +228,11 @@ function injectClickHandler(tabId) {
   // Получаем URL текущей вкладки перед внедрением обработчика
   chrome.tabs.get(tabId, function(tab) {
     if (chrome.runtime.lastError) {
-      console.error('Ошибка при получении информации о вкладке:', chrome.runtime.lastError.message);
       return;
     }
     
     // Проверяем разрешения для URL
     if (!hasPermissionForUrl(tab.url)) {
-      console.log(`Нет разрешения для внедрения обработчика на: ${tab.url}`);
       return;
     }
     
@@ -251,19 +240,16 @@ function injectClickHandler(tabId) {
     chrome.scripting.executeScript({
       target: { tabId },
       func: function() {
-        // Предотвращаем повторную инъекцию
-        if (window.__reactToggleHandlerInjected) return;
-        window.__reactToggleHandlerInjected = true;
-        
-        console.log('Внедряем обработчик кликов для модификации ссылок');
+        // Проверяем, не был ли уже установлен обработчик
+        if (window.__reactToggleHandlerInstalled) return;
+        window.__reactToggleHandlerInstalled = true;
         
         // Функция для обработки всех ссылок на странице
         function processAllLinks() {
           try {
-            // Получаем все ссылки на странице
-            const links = document.querySelectorAll('a[href]');
+            const allLinks = document.querySelectorAll('a[href]');
             
-            links.forEach(link => {
+            allLinks.forEach(link => {
               const href = link.getAttribute('href');
               if (!href) return;
               
@@ -279,7 +265,7 @@ function injectClickHandler(tabId) {
               });
             });
           } catch (e) {
-            console.error('Ошибка при обработке ссылок:', e);
+            // Ошибка при обработке ссылок
           }
         }
         
@@ -337,7 +323,7 @@ function injectClickHandler(tabId) {
         });
       }
     }).catch(err => {
-      console.error('Ошибка при внедрении обработчика кликов:', err);
+      // Ошибка при внедрении обработчика кликов
     });
   });
 }
@@ -384,8 +370,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Функция обновления одной вкладки
 function updateTab(tab) {
-  if (!tab.url || !hasPermissionForUrl(tab.url)) {
-    console.log(`Пропускаем обработку для URL без разрешений: ${tab.url}`);
+  // Проверяем разрешения для URL
+  if (!hasPermissionForUrl(tab.url)) {
     return;
   }
   
@@ -398,7 +384,6 @@ function updateTab(tab) {
     );
     
     if (!isActiveDomain) {
-      console.log(`URL не относится к активным доменам: ${tab.url}`);
       return;
     }
     
@@ -408,7 +393,6 @@ function updateTab(tab) {
     );
     
     if (!hasMatchingPattern) {
-      console.log(`URL не соответствует шаблонам путей: ${tab.url}`);
       return;
     }
     
@@ -431,27 +415,19 @@ function updateTab(tab) {
           newUrl = url.href;
         }
         
-        console.log(`Обновляем URL вкладки после нажатия кнопки: ${tab.url} -> ${newUrl}`);
-        
         // Обновляем URL вкладки
         chrome.tabs.update(tab.id, { url: newUrl });
-      } else {
-        console.log(`Параметр уже имеет нужное значение: ${tab.url}`);
       }
     } 
     // Если страница не содержит параметр, но функция включена
     else if (settings.urlParamEnabled) {
       const newUrl = addReactToggleToUrl(tab.url);
       
-      console.log(`Добавляем параметр к URL после нажатия кнопки: ${tab.url} -> ${newUrl}`);
-      
       // Обновляем URL вкладки
       chrome.tabs.update(tab.id, { url: newUrl });
-    } else {
-      console.log(`Не требуются изменения для URL: ${tab.url}`);
     }
   } catch (e) {
-    console.error('Ошибка при обновлении вкладки:', e);
+    // Ошибка при обновлении вкладки
   }
 }
 
@@ -460,7 +436,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
     // Проверяем разрешения перед выполнением действий
     if (!hasPermissionForUrl(tab.url)) {
-      console.log(`Пропускаем обработку для URL без разрешений: ${tab.url}`);
       return;
     }
     
@@ -477,7 +452,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       
       // Если нужно добавить параметр и страница не была недавно модифицирована
       if (shouldAddReactToggle(tab.url) && !wasRecentlyModified(urlWithoutParams)) {
-        console.log(`Добавляем параметр к URL: ${tab.url}`);
         const modifiedUrl = addReactToggleToUrl(tab.url);
         
         // Отмечаем URL как модифицированный для предотвращения циклов
@@ -487,7 +461,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         chrome.tabs.update(tabId, { url: modifiedUrl });
       }
     } catch (e) {
-      console.error('Ошибка при обработке URL в onUpdated:', e);
+      // Ошибка при обработке URL в onUpdated
     }
   }
 });
@@ -497,7 +471,6 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId === 0) {
     // Проверяем разрешения перед выполнением действий
     if (!hasPermissionForUrl(details.url)) {
-      console.log(`Пропускаем обработку изменений истории для URL без разрешений: ${details.url}`);
       return;
     }
     
@@ -510,7 +483,6 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
       
       // Если нужно добавить параметр и страница не была недавно модифицирована
       if (shouldAddReactToggle(details.url) && !wasRecentlyModified(urlWithoutParams)) {
-        console.log(`Добавляем параметр к URL при изменении истории: ${details.url}`);
         const modifiedUrl = addReactToggleToUrl(details.url);
         
         // Отмечаем URL как модифицированный для предотвращения циклов
@@ -520,7 +492,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
         chrome.tabs.update(details.tabId, { url: modifiedUrl });
       }
     } catch (e) {
-      console.error('Ошибка при обработке URL в onHistoryStateUpdated:', e);
+      // Ошибка при обработке URL в onHistoryStateUpdated
     }
   }
 });
@@ -574,8 +546,6 @@ function updateOpenTabs() {
               newUrl = url.href;
             }
             
-            console.log(`Обновляем URL вкладки после изменения настроек: ${tab.url} -> ${newUrl}`);
-            
             // Отмечаем URL как модифицированный для предотвращения циклов
             const urlWithoutParams = url.origin + url.pathname;
             markAsModified(urlWithoutParams);
@@ -592,8 +562,6 @@ function updateOpenTabs() {
           if (!wasRecentlyModified(urlWithoutParams)) {
             const newUrl = addReactToggleToUrl(tab.url);
             
-            console.log(`Добавляем параметр к URL после включения функции: ${tab.url} -> ${newUrl}`);
-            
             // Отмечаем URL как модифицированный
             markAsModified(urlWithoutParams);
             
@@ -602,7 +570,7 @@ function updateOpenTabs() {
           }
         }
       } catch (e) {
-        console.error('Ошибка при обновлении вкладки:', e);
+        // Ошибка при обновлении вкладки
       }
     });
   });

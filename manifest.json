@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Usedesk QA Tools",
+  "version": "1.0",
+  "description": "Изменяет favicon в зависимости от стенда Юздекска. Добавлят к урлу ключ отключающий реакт",
+  "permissions": [
+    "storage",
+    "tabs",
+    "webNavigation",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.usedesk.ru/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/usedesk_logo_test.png"
+    }
+  },
+  "icons": {
+    "16": "icons/usedesk_logo_test.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/favicon_laravel6.png", "icons/favicon_devsecure.png"],
+      "matches": ["*://*.usedesk.ru/*"]
+    }
+  ]
+} 

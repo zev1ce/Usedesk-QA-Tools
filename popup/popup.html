@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <style>
+    body {
+      min-width: 320px;
+      padding: 10px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      color: #333;
+      background-color: #f8f8f8;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      border: none;
+      margin: 0;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background-color: transparent;
+      padding: 0;
+    }
+    h2 {
+      margin-top: 0;
+      color: #4a4a4a;
+      text-align: center;
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+    }
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+    }
+    .toggle-label-with-tooltip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      line-height: 20px;
+      flex: 1;
+      position: relative;
+      padding-right: 30px;
+    }
+    .toggle-label {
+      display: inline-block;
+    }
+    .tooltip-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      background-color: #2196F3;
+      color: white;
+      border-radius: 50%;
+      font-size: 10px;
+      font-weight: bold;
+      cursor: help;
+      position: absolute;
+      right: 10px;
+    }
+    .tooltip-icon:hover .tooltip-content {
+      display: block;
+    }
+    .tooltip-content {
+      display: none;
+      position: absolute;
+      background-color: #333;
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      width: 160px;
+      z-index: 100;
+      left: -80px;
+      top: 25px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      font-weight: normal;
+      line-height: 1.4;
+      font-size: 11px;
+      text-align: left;
+    }
+    .tooltip-content::before {
+      content: "";
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      margin-left: -5px;
+      border-width: 5px;
+      border-style: solid;
+      border-color: transparent transparent #333 transparent;
+    }
+    .tooltip-title {
+      margin-bottom: 8px;
+      display: block;
+    }
+    .favicon-preview {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .favicon-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .favicon-green {
+      background-color: #4CAF50;
+    }
+    .favicon-blue {
+      background-color: #2196F3;
+    }
+    .favicon-red {
+      background-color: #F44336;
+    }
+    .toggle {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 20px;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #e0e0e0;
+      transition: .3s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #2196F3;
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+    input:disabled + .slider {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .section-title {
+      margin-top: 10px;
+      font-weight: bold;
+      color: #4a4a4a;
+      padding-bottom: 5px;
+      border-bottom: 1px solid #eee;
+    }
+    .react-toggle-label {
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .nested-setting {
+      margin-left: 20px;
+      margin-top: 10px;
+      padding-left: 10px;
+      border-left: 2px solid #eee;
+    }
+    .update-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .update-buttons button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      background-color: #2196F3;
+      color: white;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.2;
+      text-align: center;
+      transition: background-color 0.2s;
+    }
+    .update-buttons button:hover {
+      background-color: #0b7dda;
+    }
+    .toggle-radio-group {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .design-toggle-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 5px;
+    }
+    .design-button {
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background-color: #f5f5f5;
+      font-size: 12px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .design-button.active {
+      background-color: #2196F3;
+      color: white;
+      border-color: #2196F3;
+    }
+    .design-button:hover:not(.active) {
+      background-color: #e0e0e0;
+    }
+    .disabled-text {
+      color: #999;
+    }
+    .checkbox-group {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .checkbox-option {
+      display: flex;
+      align-items: center;
+      margin-left: 5px;
+    }
+    .checkbox-option input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    .domain-group {
+      background-color: #f5f5f5;
+      border-radius: 6px;
+      padding: 10px;
+      margin-top: 5px;
+    }
+    .domain-group-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #555;
+      font-size: 13px;
+    }
+    .toggle-section, .param-section {
+      background-color: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Usedesk QA Tools</h2>
+    
+    <div class="toggle-section">
+      <div class="toggle-container">
+        <div class="toggle-label-with-tooltip">
+          <span class="toggle-label">Замена лого Юздеска для разных стендов</span>
+          <div class="tooltip-icon">?
+            <div class="tooltip-content">
+              <strong class="tooltip-title">Замена иконок для стендов:</strong>
+              <div class="favicon-item">
+                <img class="favicon-preview" src="../icons/favicon_laravel6.png">
+                <span>laravel6.usedesk.ru</span>
+              </div>
+              <div class="favicon-item">
+                <img class="favicon-preview" src="../icons/favicon_devsecure.png">
+                <span>devsecure.usedesk.ru</span>
+              </div>
+              <div class="favicon-item">
+                <img class="favicon-preview" src="../icons/favicon_prod.png">
+                <span>secure.usedesk.ru</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="favicon-toggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    
+    <div class="param-section">
+      <div class="toggle-container">
+        <div class="toggle-label-with-tooltip">
+          <span class="toggle-label">Добавлять параметр react_toggle</span>
+          <div class="tooltip-icon">?
+            <div class="tooltip-content">
+              <span>Добавление параметра react_toggle=? в соотв. с выбранным дизайном для страниц оператроской (/chat) и детальной тикета (/tickets/{id})</span>
+            </div>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="url-param-toggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+    
+      <div id="react-toggle-settings" style="margin-top: 15px;">
+        <div class="design-toggle-buttons">
+          <button type="button" id="old-design-button" class="design-button active">Старый дизайн</button>
+          <button type="button" id="new-design-button" class="design-button">Новый дизайн</button>
+          <input type="hidden" id="react-toggle-value" value="0">
+        </div>
+        
+        <div class="toggle-container" style="margin-top: 10px;">
+          <span class="toggle-label">Автообновление страниц</span>
+          <label class="toggle">
+            <input type="checkbox" id="auto-update-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        
+        <div id="auto-update-mode" class="nested-setting">
+          <div class="toggle-label">Режим автообновления:</div>
+          <div class="toggle-radio-group">
+            <label class="radio-option">
+              <input type="radio" name="update-mode" id="current-tab-mode" value="current" checked>
+              <span class="radio-label">Текущая вкладка</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="update-mode" id="all-tabs-mode" value="all">
+              <span class="radio-label">Все вкладки</span>
+            </label>
+          </div>
+        </div>
+        
+        <div class="domain-group">
+          <div class="domain-group-title">Действует на стендах:</div>
+          <div class="checkbox-group" id="domain-checkboxes">
+            <label class="checkbox-option">
+              <input type="checkbox" name="domain" value="https://laravel6.usedesk.ru/" checked>
+              <span>laravel6.usedesk.ru</span>
+            </label>
+            <label class="checkbox-option">
+              <input type="checkbox" name="domain" value="https://devsecure.usedesk.ru/" checked>
+              <span>devsecure.usedesk.ru</span>
+            </label>
+            <label class="checkbox-option">
+              <input type="checkbox" name="domain" value="https://secure.usedesk.ru/" checked>
+              <span>secure.usedesk.ru</span>
+            </label>
+          </div>
+        </div>
+        
+        <div class="update-buttons">
+          <button id="update-current-tab">Обновить текущую вкладку</button>
+          <button id="update-all-tabs">Обновить все вкладки</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html> 

@@ -221,111 +221,127 @@ function addReactToggleToUrl(url) {
   }
 }
 
-// Обновляем функцию внедрения обработчика кликов
-function injectClickHandler(tabId) {
-  if (!settings.urlParamEnabled) return;
-  
-  // Получаем URL текущей вкладки перед внедрением обработчика
-  chrome.tabs.get(tabId, function(tab) {
-    if (chrome.runtime.lastError) {
-      return;
-    }
-    
-    // Проверяем разрешения для URL
-    if (!hasPermissionForUrl(tab.url)) {
-      return;
-    }
-    
-    // Продолжаем внедрение обработчика
-    chrome.scripting.executeScript({
-      target: { tabId },
-      func: function() {
-        // Проверяем, не был ли уже установлен обработчик
-        if (window.__reactToggleHandlerInstalled) return;
-        window.__reactToggleHandlerInstalled = true;
-        
-        // Функция для обработки всех ссылок на странице
-        function processAllLinks() {
-          try {
-            const allLinks = document.querySelectorAll('a[href]');
-            
-            allLinks.forEach(link => {
-              const href = link.getAttribute('href');
-              if (!href) return;
-              
-              // Проверяем через скрытый параметр, была ли ссылка уже обработана
-              if (link.__reactToggleProcessed) return;
-              link.__reactToggleProcessed = true;
-              
-              // Отправляем сообщение в фоновый скрипт для проверки
-              chrome.runtime.sendMessage({
-                action: 'checkUrl',
-                url: href,
-                baseUrl: window.location.origin
-              });
-            });
-          } catch (e) {
-            // Ошибка при обработке ссылок
-          }
-        }
-        
-        // Обрабатываем все ссылки при загрузке
-        processAllLinks();
-        
-        // Используем MutationObserver для отслеживания новых ссылок
-        const observer = new MutationObserver(mutations => {
-          mutations.forEach(mutation => {
-            if (mutation.addedNodes && mutation.addedNodes.length > 0) {
-              processAllLinks();
-            }
-          });
-        });
-        
-        // Запускаем наблюдатель
-        observer.observe(document.body, {
-          childList: true,
-          subtree: true
-        });
-        
-        // Обработчик для отслеживания кликов
-        document.addEventListener('click', function(e) {
-          // Находим ближайший родительский элемент <a>
-          let el = e.target;
-          while (el && el.tagName !== 'A') {
-            el = el.parentElement;
-            if (!el) return;
-          }
-          
-          // Если это не ссылка, выходим
-          if (!el) return;
-          
-          // Получаем href ссылки
-          const href = el.getAttribute('href');
-          if (!href) return;
-          
-          // Отправляем сообщение в фоновый скрипт с URL для проверки
-          chrome.runtime.sendMessage({
-            action: 'checkUrl',
-            url: href,
-            baseUrl: window.location.origin
-          });
-        }, true);
-        
-        // Прослушиваем сообщения от фонового скрипта
-        chrome.runtime.onMessage.addListener((message) => {
-          if (message.action === 'modifyUrl' && message.url) {
-            // Находим все ссылки с указанным URL
-            const links = document.querySelectorAll(`a[href="${message.originalUrl}"]`);
-            links.forEach(link => {
-              link.setAttribute('href', message.url);
-            });
-          }
-        });
+// Функция генерации и применения правил DNR для добавления react_toggle до загрузки
+async function updateDnrRulesFromSettings() {
+  try {
+    // Если функция отключена, очищаем правила
+    if (!settings.urlParamEnabled) {
+      const existing = await chrome.declarativeNetRequest.getDynamicRules();
+      const removeIds = existing.map(r => r.id);
+      if (removeIds.length) {
+        await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules: [] });
       }
-    }).catch(err => {
-      // Ошибка при внедрении обработчика кликов
+      return;
+    }
+
+    // Строим набор правил по активным доменам
+    const addRules = [];
+    const desiredValue = settings.reactToggleValue ? '1' : '0';
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeIds = existing.map(r => r.id);
+
+    let ruleId = 1000;
+    const activeDomains = Array.isArray(settings.activeDomains) ? settings.activeDomains : [];
+
+    activeDomains.forEach(domainUrl => {
+      try {
+        const hostname = new URL(domainUrl).hostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Только детальная страница тикета; чат обрабатываем приложением и фоновым скриптом
+        const regexTickets = `^https?://${hostname}/(tickets/\\d+)(?:$|\\?.*)`;
+        addRules.push({
+          id: ++ruleId,
+          priority: 1,
+          action: {
+            type: 'redirect',
+            redirect: {
+              transform: {
+                queryTransform: {
+                  addOrReplaceParams: [{ key: 'react_toggle', value: desiredValue }]
+                }
+              }
+            }
+          },
+          condition: {
+            regexFilter: regexTickets,
+            resourceTypes: ['main_frame']
+          }
+        });
+      } catch (_) { }
     });
-  });
+
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules });
+  } catch (_) { }
+}
+
+// Вызываем применениe правил при старте после загрузки настроек
+chrome.storage.sync.get('settings', (data) => {
+  if (data.settings) {
+    // Объединяем значения из хранилища с дефолтными, сохраняя предустановленные значения
+    settings = {
+      ...defaultSettings,
+      faviconEnabled: data.settings.faviconEnabled !== undefined ? data.settings.faviconEnabled : defaultSettings.faviconEnabled,
+      urlParamEnabled: data.settings.urlParamEnabled !== undefined ? data.settings.urlParamEnabled : defaultSettings.urlParamEnabled,
+      reactToggleValue: data.settings.reactToggleValue !== undefined ? data.settings.reactToggleValue : defaultSettings.reactToggleValue,
+      activeDomains: data.settings.activeDomains || defaultSettings.activeDomains,
+      autoUpdateEnabled: data.settings.autoUpdateEnabled !== undefined ? data.settings.autoUpdateEnabled : defaultSettings.autoUpdateEnabled,
+      autoUpdateMode: data.settings.autoUpdateMode || defaultSettings.autoUpdateMode
+    };
+  } else {
+    chrome.storage.sync.set({ settings });
+  }
+  // применяем правила
+  updateDnrRulesFromSettings();
+});
+
+// Обновляем правила при изменении соответствующих настроек
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.settings) {
+    const oldSettings = settings;
+    
+    // Обновляем текущие настройки
+    settings = {
+      ...defaultSettings,
+      faviconEnabled: changes.settings.newValue.faviconEnabled,
+      urlParamEnabled: changes.settings.newValue.urlParamEnabled,
+      reactToggleValue: changes.settings.newValue.reactToggleValue,
+      activeDomains: changes.settings.newValue.activeDomains || defaultSettings.activeDomains,
+      autoUpdateEnabled: changes.settings.newValue.autoUpdateEnabled,
+      autoUpdateMode: changes.settings.newValue.autoUpdateMode
+    };
+    
+    // Проверяем, изменилось ли значение reactToggleValue
+    const toggleValueChanged = oldSettings.reactToggleValue !== settings.reactToggleValue;
+    
+    // Если автообновление включено и значение переключателя изменилось
+    if (settings.autoUpdateEnabled && toggleValueChanged) {
+      if (settings.autoUpdateMode === 'current') {
+        // Обновляем только текущую вкладку
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length > 0) {
+            updateTab(tabs[0]);
+          }
+        });
+      } else {
+        // Обновляем все вкладки
+        updateOpenTabs();
+      }
+    }
+
+    // Применяем правила при изменении настроек
+    updateDnrRulesFromSettings().then(() => {
+      // Мгновенно применяем изменение на активной вкладке через контент-скрипт без перезагрузки
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'applyDesignNow' });
+        }
+      });
+    });
+  }
+});
+
+// Отключаем поздние модификации URL через инъекцию обработчиков
+function injectClickHandler(tabId) {
+  return; // не используем больше late-injection для изменения ссылок
 }
 
 // Добавляем слушателя для сообщений от popup.js
@@ -350,6 +366,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         url: modifiedUrl
       });
     }
+  }
+  
+  // Новый код: установить дизайн и перезагрузить текущую вкладку (жестко)
+  else if (message.action === 'setDesignAndReloadCurrent') {
+    chrome.storage.sync.get('settings', (data) => {
+      const current = data.settings || { ...defaultSettings };
+      current.reactToggleValue = !!message.value;
+      chrome.storage.sync.set({ settings: current }, () => {
+        updateDnrRulesFromSettings().then(() => {
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs[0] && tabs[0].url && hasPermissionForUrl(tabs[0].url)) {
+              const desiredUrl = addReactToggleToUrl(tabs[0].url);
+              try {
+                const curr = new URL(tabs[0].url);
+                const desired = new URL(desiredUrl);
+                const same = curr.href === desired.href;
+                if (!same) {
+                  chrome.tabs.update(tabs[0].id, { url: desired.href });
+                } else {
+                  chrome.tabs.reload(tabs[0].id);
+                }
+              } catch (_) {
+                chrome.tabs.reload(tabs[0].id);
+              }
+            }
+          });
+        });
+      });
+    });
   }
   
   // Новый код для обработки кнопки "Обновить текущую вкладку"
@@ -439,34 +484,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       return;
     }
     
-    // Заменяем favicon
+    // Обновляем только favicon
     changeFavicon(tabId, tab.url);
     setTimeout(() => changeFavicon(tabId, tab.url), 1500);
-    
-    // Внедряем обработчик кликов
-    injectClickHandler(tabId);
-    
-    try {
-      const urlObj = new URL(tab.url);
-      const urlWithoutParams = urlObj.origin + urlObj.pathname;
-      
-      // Если нужно добавить параметр и страница не была недавно модифицирована
-      if (shouldAddReactToggle(tab.url) && !wasRecentlyModified(urlWithoutParams)) {
-        const modifiedUrl = addReactToggleToUrl(tab.url);
-        
-        // Отмечаем URL как модифицированный для предотвращения циклов
-        markAsModified(urlWithoutParams);
-        
-        // Обновляем URL вкладки
-        chrome.tabs.update(tabId, { url: modifiedUrl });
-      }
-    } catch (e) {
-      // Ошибка при обработке URL в onUpdated
-    }
+
+    // Ранее здесь была логика добавления параметра и инъекций — удалена
   }
 });
 
-// Аналогично обновляем обработчик изменений истории URL
+// Аналогично обновляем обработчик изменений истории URL — только favicon
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId === 0) {
     // Проверяем разрешения перед выполнением действий
@@ -477,23 +503,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
     // Заменяем favicon
     changeFavicon(details.tabId, details.url);
     
-    try {
-      const urlObj = new URL(details.url);
-      const urlWithoutParams = urlObj.origin + urlObj.pathname;
-      
-      // Если нужно добавить параметр и страница не была недавно модифицирована
-      if (shouldAddReactToggle(details.url) && !wasRecentlyModified(urlWithoutParams)) {
-        const modifiedUrl = addReactToggleToUrl(details.url);
-        
-        // Отмечаем URL как модифицированный для предотвращения циклов
-        markAsModified(urlWithoutParams);
-        
-        // Обновляем URL вкладки
-        chrome.tabs.update(details.tabId, { url: modifiedUrl });
-      }
-    } catch (e) {
-      // Ошибка при обработке URL в onHistoryStateUpdated
-    }
+    // Ранее здесь была логика добавления параметра и инъекций — удалена
   }
 });
 

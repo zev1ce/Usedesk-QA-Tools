@@ -13,6 +13,19 @@ const autoUpdateModeDiv = document.getElementById('auto-update-mode');
 const currentTabMode = document.getElementById('current-tab-mode');
 const allTabsMode = document.getElementById('all-tabs-mode');
 
+// Вспомогательная функция выставления активной кнопки
+function setDesignButtons(isNew) {
+  if (isNew) {
+    newDesignButton.classList.add('active');
+    oldDesignButton.classList.remove('active');
+    reactToggleValue.value = "1";
+  } else {
+    oldDesignButton.classList.add('active');
+    newDesignButton.classList.remove('active');
+    reactToggleValue.value = "0";
+  }
+}
+
 // Функция для получения выбранных доменов из чекбоксов
 function getSelectedDomains() {
   return Array.from(domainCheckboxes)
@@ -41,7 +54,7 @@ function getAutoUpdateMode() {
   return currentTabMode.checked ? 'current' : 'all';
 }
 
-// Загружаем текущие настройки
+// Загружаем текущие настройки и инициализируем кнопки по URL активной вкладки
 chrome.storage.sync.get('settings', (data) => {
   if (data.settings) {
     faviconToggle.checked = data.settings.faviconEnabled !== undefined ? 
@@ -49,20 +62,26 @@ chrome.storage.sync.get('settings', (data) => {
     
     urlParamToggle.checked = data.settings.urlParamEnabled !== undefined ? 
                              data.settings.urlParamEnabled : true;
-    
-    // Настройка кнопок выбора дизайна
-    const isNewDesign = data.settings.reactToggleValue !== undefined ?
-                             data.settings.reactToggleValue : false;
-    
-    if (isNewDesign) {
-      newDesignButton.classList.add('active');
-      oldDesignButton.classList.remove('active');
-      reactToggleValue.value = "1";
-    } else {
-      oldDesignButton.classList.add('active');
-      newDesignButton.classList.remove('active');
-      reactToggleValue.value = "0";
-    }
+
+    // Определяем активный дизайн из URL текущей вкладки, если параметр присутствует
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      let isNewFromUrl = null;
+      try {
+        const currentUrl = tabs && tabs[0] ? tabs[0].url : null;
+        if (currentUrl) {
+          const u = new URL(currentUrl);
+          if (u.searchParams.has('react_toggle')) {
+            isNewFromUrl = u.searchParams.get('react_toggle') === '1';
+          }
+        }
+      } catch (_) {}
+
+      const isNewDesign = (isNewFromUrl !== null)
+        ? isNewFromUrl
+        : (data.settings.reactToggleValue !== undefined ? data.settings.reactToggleValue : false);
+
+      setDesignButtons(isNewDesign);
+    });
     
     // Настройки автообновления
     autoUpdateToggle.checked = data.settings.autoUpdateEnabled !== undefined ?
@@ -106,49 +125,15 @@ urlParamToggle.addEventListener('change', () => {
 
 // Обработчики кнопок выбора дизайна
 oldDesignButton.addEventListener('click', () => {
-  if (!oldDesignButton.classList.contains('active')) {
-    oldDesignButton.classList.add('active');
-    newDesignButton.classList.remove('active');
-    reactToggleValue.value = "0";
-    
-    chrome.storage.sync.get('settings', (data) => {
-      const settings = data.settings || {};
-      settings.reactToggleValue = false;
-      chrome.storage.sync.set({ settings });
-      
-      // Если автообновление включено, обновляем страницы
-      if (settings.autoUpdateEnabled) {
-        if (settings.autoUpdateMode === 'current') {
-          chrome.runtime.sendMessage({ action: 'updateCurrentTab' });
-        } else {
-          chrome.runtime.sendMessage({ action: 'updateAllTabs' });
-        }
-      }
-    });
-  }
+  if (oldDesignButton.classList.contains('active')) return;
+  setDesignButtons(false);
+  chrome.runtime.sendMessage({ action: 'setDesignAndReloadCurrent', value: 0 });
 });
 
 newDesignButton.addEventListener('click', () => {
-  if (!newDesignButton.classList.contains('active')) {
-    newDesignButton.classList.add('active');
-    oldDesignButton.classList.remove('active');
-    reactToggleValue.value = "1";
-    
-    chrome.storage.sync.get('settings', (data) => {
-      const settings = data.settings || {};
-      settings.reactToggleValue = true;
-      chrome.storage.sync.set({ settings });
-      
-      // Если автообновление включено, обновляем страницы
-      if (settings.autoUpdateEnabled) {
-        if (settings.autoUpdateMode === 'current') {
-          chrome.runtime.sendMessage({ action: 'updateCurrentTab' });
-        } else {
-          chrome.runtime.sendMessage({ action: 'updateAllTabs' });
-        }
-      }
-    });
-  }
+  if (newDesignButton.classList.contains('active')) return;
+  setDesignButtons(true);
+  chrome.runtime.sendMessage({ action: 'setDesignAndReloadCurrent', value: 1 });
 });
 
 // Обработчик для чекбоксов доменов
@@ -195,19 +180,13 @@ allTabsMode.addEventListener('change', () => {
 
 // Обработчик для кнопки "Обновить текущую вкладку"
 updateCurrentTabBtn.addEventListener('click', () => {
-  // Отправляем сообщение в background script для обновления активной вкладки
   chrome.runtime.sendMessage({ action: 'updateCurrentTab' });
-  
-  // Закрываем popup после клика
   window.close();
 });
 
 // Обработчик для кнопки "Обновить все вкладки"
 updateAllTabsBtn.addEventListener('click', () => {
-  // Отправляем сообщение в background script для обновления всех вкладок
   chrome.runtime.sendMessage({ action: 'updateAllTabs' });
-  
-  // Закрываем popup после клика
   window.close();
 });
 

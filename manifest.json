@@ -8,7 +8,9 @@
     "tabs",
     "webNavigation",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "*://*.usedesk.ru/*"
@@ -27,8 +29,15 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/favicon_laravel6.png", "icons/favicon_devsecure.png"],
+      "resources": ["icons/favicon_laravel6.png", "icons/favicon_devsecure.png", "icons/favicon_prod.png"],
       "matches": ["*://*.usedesk.ru/*"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.usedesk.ru/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
     }
   ]
 } 

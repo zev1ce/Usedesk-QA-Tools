@@ -8,13 +8,13 @@ const defaultSettings = {
   autoUpdateMode: 'current',
   faviconMappings: {
     "https://laravel6.usedesk.ru/": "icons/favicon_laravel6.png",
-    "https://devsecure.usedesk.ru/": "icons/favicon_devsecure.png",
+    "https://secure-preprod.usedesk.dev/": "icons/favicon_devsecure.png",
     "https://secure.usedesk.ru/": "icons/favicon_prod.png"
   },
   // Домены, на которых активна функция добавления параметра
   activeDomains: [
     "https://laravel6.usedesk.ru/",
-    "https://devsecure.usedesk.ru/",
+    "https://secure-preprod.usedesk.dev/",
     "https://secure.usedesk.ru/"
   ],
   // Пути, для которых нужно добавлять параметр
@@ -24,59 +24,52 @@ const defaultSettings = {
   ]
 };
 
-// Загрузка настроек при запуске
-let settings = defaultSettings;
-chrome.storage.sync.get('settings', (data) => {
-  if (data.settings) {
-    // Объединяем значения из хранилища с дефолтными, сохраняя предустановленные значения
-    settings = {
-      ...defaultSettings,
-      faviconEnabled: data.settings.faviconEnabled !== undefined ? data.settings.faviconEnabled : defaultSettings.faviconEnabled,
-      urlParamEnabled: data.settings.urlParamEnabled !== undefined ? data.settings.urlParamEnabled : defaultSettings.urlParamEnabled,
-      reactToggleValue: data.settings.reactToggleValue !== undefined ? data.settings.reactToggleValue : defaultSettings.reactToggleValue,
-      activeDomains: data.settings.activeDomains || defaultSettings.activeDomains,
-      autoUpdateEnabled: data.settings.autoUpdateEnabled !== undefined ? data.settings.autoUpdateEnabled : defaultSettings.autoUpdateEnabled,
-      autoUpdateMode: data.settings.autoUpdateMode || defaultSettings.autoUpdateMode
-    };
-  } else {
-    chrome.storage.sync.set({ settings });
-  }
-});
+const LEGACY_DEVSECURE = "https://devsecure.usedesk.ru/";
+const SECURE_PREPROD = "https://secure-preprod.usedesk.dev/";
 
-// Обновляем обработчик изменений настроек
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.settings) {
-    const oldSettings = settings;
-    
-    // Обновляем текущие настройки
-    settings = {
-      ...defaultSettings,
-      faviconEnabled: changes.settings.newValue.faviconEnabled,
-      urlParamEnabled: changes.settings.newValue.urlParamEnabled,
-      reactToggleValue: changes.settings.newValue.reactToggleValue,
-      activeDomains: changes.settings.newValue.activeDomains || defaultSettings.activeDomains,
-      autoUpdateEnabled: changes.settings.newValue.autoUpdateEnabled,
-      autoUpdateMode: changes.settings.newValue.autoUpdateMode
-    };
-    
-    // Проверяем, изменилось ли значение reactToggleValue
-    const toggleValueChanged = oldSettings.reactToggleValue !== settings.reactToggleValue;
-    
-    // Если автообновление включено и значение переключателя изменилось
-    if (settings.autoUpdateEnabled && toggleValueChanged) {
-      if (settings.autoUpdateMode === 'current') {
-        // Обновляем только текущую вкладку
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          if (tabs.length > 0) {
-            updateTab(tabs[0]);
-          }
-        });
-      } else {
-        // Обновляем все вкладки
-        updateOpenTabs();
-      }
-    }
+function normalizeSettings(raw) {
+  const merged = {
+    ...defaultSettings,
+    ...(raw || {})
+  };
+
+  // Приводим домены и маппинги к актуальному стенду (миграция с devsecure.usedesk.ru)
+  if (Array.isArray(merged.activeDomains)) {
+    const nextDomains = merged.activeDomains.map(d => (d === LEGACY_DEVSECURE ? SECURE_PREPROD : d));
+    merged.activeDomains = Array.from(new Set(nextDomains));
+  } else {
+    merged.activeDomains = [...defaultSettings.activeDomains];
   }
+
+  if (merged.faviconMappings && typeof merged.faviconMappings === 'object') {
+    if (merged.faviconMappings[LEGACY_DEVSECURE] && !merged.faviconMappings[SECURE_PREPROD]) {
+      merged.faviconMappings[SECURE_PREPROD] = merged.faviconMappings[LEGACY_DEVSECURE];
+    }
+    if (merged.faviconMappings[LEGACY_DEVSECURE]) {
+      delete merged.faviconMappings[LEGACY_DEVSECURE];
+    }
+  } else {
+    merged.faviconMappings = { ...defaultSettings.faviconMappings };
+  }
+
+  // Уважим выключение параметра, даже если urlPatterns остались от старой версии
+  if (!Array.isArray(merged.urlPatterns)) {
+    merged.urlPatterns = [...defaultSettings.urlPatterns];
+  }
+
+  return merged;
+}
+
+// Загрузка настроек при запуске (с миграцией)
+let settings = { ...defaultSettings };
+chrome.storage.sync.get('settings', (data) => {
+  const raw = data && data.settings ? data.settings : null;
+  const normalized = normalizeSettings(raw);
+  settings = normalized;
+  if (!raw || JSON.stringify(raw) !== JSON.stringify(normalized)) {
+    chrome.storage.sync.set({ settings: normalized });
+  }
+  updateDnrRulesFromSettings();
 });
 
 // Добавляем механизм защиты от бесконечных циклов
@@ -107,7 +100,7 @@ function hasPermissionForUrl(url) {
   try {
     const urlObj = new URL(url);
     // Проверяем, соответствует ли домен нашему разрешению
-    return urlObj.hostname.endsWith('.usedesk.ru');
+    return urlObj.hostname.endsWith('.usedesk.ru') || urlObj.hostname.endsWith('.usedesk.dev');
   } catch (e) {
     return false;
   }
@@ -177,36 +170,6 @@ function changeFavicon(tabId, url) {
   }
 }
 
-// Функция для проверки, нужно ли добавлять параметр
-function shouldAddReactToggle(url) {
-  if (!settings.urlParamEnabled) return false;
-  
-  try {
-    const urlObj = new URL(url);
-    
-    // Если URL уже содержит параметр react_toggle, не нужно добавлять
-    if (urlObj.searchParams.has('react_toggle')) {
-      return false;
-    }
-    
-    // Проверяем, относится ли URL к активным доменам
-    const isActiveDomain = settings.activeDomains.some(domain => 
-      url.startsWith(domain)
-    );
-    
-    if (!isActiveDomain) return false;
-    
-    // Проверяем, содержит ли URL один из шаблонов путей
-    const hasMatchingPattern = settings.urlPatterns.some(pattern => 
-      urlObj.pathname.includes(pattern)
-    );
-    
-    return hasMatchingPattern;
-  } catch (e) {
-    return false;
-  }
-}
-
 // Функция для добавления параметра в URL
 function addReactToggleToUrl(url) {
   try {
@@ -219,6 +182,19 @@ function addReactToggleToUrl(url) {
   } catch (e) {
     return url;
   }
+}
+
+function matchesReactTogglePath(pathname) {
+  if (!pathname) return false;
+
+  // /tickets (список) и /tickets/{id} (детальная)
+  if (pathname === '/tickets' || pathname === '/tickets/') return true;
+  if (/^\/tickets\/\d+\/?$/.test(pathname)) return true;
+
+  // /chat (+ вложенные)
+  if (pathname === '/chat' || pathname.startsWith('/chat/')) return true;
+
+  return false;
 }
 
 // Функция генерации и применения правил DNR для добавления react_toggle до загрузки
@@ -246,8 +222,9 @@ async function updateDnrRulesFromSettings() {
     activeDomains.forEach(domainUrl => {
       try {
         const hostname = new URL(domainUrl).hostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Только детальная страница тикета; чат обрабатываем приложением и фоновым скриптом
-        const regexTickets = `^https?://${hostname}/(tickets/\\d+)(?:$|\\?.*)`;
+        // /tickets (список) и /tickets/{id} (детальная), + /chat
+        const regexTickets = `^https?://${hostname}/tickets(?:/\\d+)?/?(?:$|\\?.*)`;
+        const regexChat = `^https?://${hostname}/chat(?:/.*)?(?:$|\\?.*)`;
         addRules.push({
           id: ++ruleId,
           priority: 1,
@@ -266,6 +243,25 @@ async function updateDnrRulesFromSettings() {
             resourceTypes: ['main_frame']
           }
         });
+
+        addRules.push({
+          id: ++ruleId,
+          priority: 1,
+          action: {
+            type: 'redirect',
+            redirect: {
+              transform: {
+                queryTransform: {
+                  addOrReplaceParams: [{ key: 'react_toggle', value: desiredValue }]
+                }
+              }
+            }
+          },
+          condition: {
+            regexFilter: regexChat,
+            resourceTypes: ['main_frame']
+          }
+        });
       } catch (_) { }
     });
 
@@ -273,103 +269,44 @@ async function updateDnrRulesFromSettings() {
   } catch (_) { }
 }
 
-// Вызываем применениe правил при старте после загрузки настроек
-chrome.storage.sync.get('settings', (data) => {
-  if (data.settings) {
-    // Объединяем значения из хранилища с дефолтными, сохраняя предустановленные значения
-    settings = {
-      ...defaultSettings,
-      faviconEnabled: data.settings.faviconEnabled !== undefined ? data.settings.faviconEnabled : defaultSettings.faviconEnabled,
-      urlParamEnabled: data.settings.urlParamEnabled !== undefined ? data.settings.urlParamEnabled : defaultSettings.urlParamEnabled,
-      reactToggleValue: data.settings.reactToggleValue !== undefined ? data.settings.reactToggleValue : defaultSettings.reactToggleValue,
-      activeDomains: data.settings.activeDomains || defaultSettings.activeDomains,
-      autoUpdateEnabled: data.settings.autoUpdateEnabled !== undefined ? data.settings.autoUpdateEnabled : defaultSettings.autoUpdateEnabled,
-      autoUpdateMode: data.settings.autoUpdateMode || defaultSettings.autoUpdateMode
-    };
-  } else {
-    chrome.storage.sync.set({ settings });
-  }
-  // применяем правила
-  updateDnrRulesFromSettings();
-});
-
-// Обновляем правила при изменении соответствующих настроек
+// Обновляем правила и поведение при изменении настроек
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.settings) {
-    const oldSettings = settings;
-    
-    // Обновляем текущие настройки
-    settings = {
-      ...defaultSettings,
-      faviconEnabled: changes.settings.newValue.faviconEnabled,
-      urlParamEnabled: changes.settings.newValue.urlParamEnabled,
-      reactToggleValue: changes.settings.newValue.reactToggleValue,
-      activeDomains: changes.settings.newValue.activeDomains || defaultSettings.activeDomains,
-      autoUpdateEnabled: changes.settings.newValue.autoUpdateEnabled,
-      autoUpdateMode: changes.settings.newValue.autoUpdateMode
-    };
-    
-    // Проверяем, изменилось ли значение reactToggleValue
-    const toggleValueChanged = oldSettings.reactToggleValue !== settings.reactToggleValue;
-    
-    // Если автообновление включено и значение переключателя изменилось
-    if (settings.autoUpdateEnabled && toggleValueChanged) {
-      if (settings.autoUpdateMode === 'current') {
-        // Обновляем только текущую вкладку
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          if (tabs.length > 0) {
-            updateTab(tabs[0]);
-          }
-        });
-      } else {
-        // Обновляем все вкладки
-        updateOpenTabs();
-      }
-    }
+  if (!changes.settings) return;
 
-    // Применяем правила при изменении настроек
-    updateDnrRulesFromSettings().then(() => {
-      // Мгновенно применяем изменение на активной вкладке через контент-скрипт без перезагрузки
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs && tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'applyDesignNow' });
-        }
-      });
+  const oldSettings = settings;
+  settings = normalizeSettings(changes.settings.newValue);
+
+  // Проверяем, изменилось ли значение reactToggleValue
+  const toggleValueChanged = oldSettings.reactToggleValue !== settings.reactToggleValue;
+
+  // Применяем правила DNR при изменении настроек
+  updateDnrRulesFromSettings().then(() => {
+    // Мгновенно применяем изменение на активной вкладке через контент-скрипт без перезагрузки
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'applyDesignNow' });
+      }
     });
+  });
+
+  // Если автообновление включено и значение переключателя изменилось
+  if (settings.autoUpdateEnabled && toggleValueChanged) {
+    if (settings.autoUpdateMode === 'current') {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs.length > 0) updateTab(tabs[0]);
+      });
+    } else {
+      updateOpenTabs();
+    }
   }
 });
 
-// Отключаем поздние модификации URL через инъекцию обработчиков
-function injectClickHandler(tabId) {
-  return; // не используем больше late-injection для изменения ссылок
-}
+// Отключаем late-injection: редирект/параметр ставим до загрузки через DNR и в content.js для SPA
 
 // Добавляем слушателя для сообщений от popup.js
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Обработка сообщений от контентного скрипта (существующий код)
-  if (message.action === 'checkUrl') {
-    let fullUrl = message.url;
-    
-    // Если URL относительный, добавляем базовый URL
-    if (!fullUrl.startsWith('http')) {
-      fullUrl = message.baseUrl + (fullUrl.startsWith('/') ? '' : '/') + fullUrl;
-    }
-    
-    // Проверяем, нужно ли добавлять параметр
-    if (shouldAddReactToggle(fullUrl)) {
-      const modifiedUrl = addReactToggleToUrl(fullUrl);
-      
-      // Отправляем обратно контентному скрипту модифицированный URL
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: 'modifyUrl',
-        originalUrl: message.url,
-        url: modifiedUrl
-      });
-    }
-  }
-  
-  // Новый код: установить дизайн и перезагрузить текущую вкладку (жестко)
-  else if (message.action === 'setDesignAndReloadCurrent') {
+  // Установить дизайн и перезагрузить текущую вкладку (жестко)
+  if (message.action === 'setDesignAndReloadCurrent') {
     chrome.storage.sync.get('settings', (data) => {
       const current = data.settings || { ...defaultSettings };
       current.reactToggleValue = !!message.value;
@@ -432,12 +369,8 @@ function updateTab(tab) {
       return;
     }
     
-    // Проверяем, содержит ли URL один из шаблонов путей
-    const hasMatchingPattern = settings.urlPatterns.some(pattern => 
-      url.pathname.includes(pattern)
-    );
-    
-    if (!hasMatchingPattern) {
+    // Проверяем, относится ли страница к зоне действия react_toggle
+    if (!matchesReactTogglePath(url.pathname)) {
       return;
     }
     
@@ -528,12 +461,8 @@ function updateOpenTabs() {
           return; // Пропускаем неактивные домены
         }
         
-        // Проверяем, содержит ли URL один из шаблонов путей
-        const hasMatchingPattern = settings.urlPatterns.some(pattern => 
-          url.pathname.includes(pattern)
-        );
-        
-        if (!hasMatchingPattern) {
+        // Проверяем, относится ли страница к зоне действия react_toggle
+        if (!matchesReactTogglePath(url.pathname)) {
           return; // Пропускаем URL, не соответствующие шаблонам
         }
         

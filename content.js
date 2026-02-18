@@ -25,9 +25,10 @@
       if (!isActive) return false;
       // Путь
       const path = u.pathname;
-      const matchesTickets = /\/tickets\/(\d+)$/.test(path);
-      const matchesChat = /\/chat(\/.*)?$/.test(path);
-      return matchesTickets || matchesChat;
+      const matchesTicketsList = path === '/tickets' || path === '/tickets/';
+      const matchesTicketsDetails = /^\/tickets\/\d+\/?$/.test(path);
+      const matchesChat = path === '/chat' || path.startsWith('/chat/');
+      return matchesTicketsList || matchesTicketsDetails || matchesChat;
     } catch (_) {
       return false;
     }
@@ -74,44 +75,45 @@
     }
   }
 
+  // Ставим перехват history.* сразу, чтобы не пропустить ранние SPA-переходы
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+
+  history.pushState = function(state, title, url) {
+    let nextUrlArg = url;
+    try {
+      const abs = url ? toAbsolute(url) : location.href;
+      if (abs && isApplicableUrl(abs)) {
+        const fixed = ensureParamValue(abs);
+        if (fixed) {
+          // Передаем относительный путь, чтобы не нарушать same-origin требования
+          const path = toSameOriginPath(fixed);
+          if (path) nextUrlArg = path;
+        }
+      }
+    } catch (_) {}
+    return originalPushState.call(history, state, title, nextUrlArg);
+  };
+
+  history.replaceState = function(state, title, url) {
+    let nextUrlArg = url;
+    try {
+      const abs = url ? toAbsolute(url) : location.href;
+      if (abs && isApplicableUrl(abs)) {
+        const fixed = ensureParamValue(abs);
+        if (fixed) {
+          const path = toSameOriginPath(fixed);
+          if (path) nextUrlArg = path;
+        }
+      }
+    } catch (_) {}
+    return originalReplaceState.call(history, state, title, nextUrlArg);
+  };
+
   // Инициализация
   fetchSettings(() => {
     // Стартовая проверка для первой загрузки
     maybeFixLocation();
-
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-
-    history.pushState = function(state, title, url) {
-      let nextUrlArg = url;
-      try {
-        const abs = url ? toAbsolute(url) : location.href;
-        if (abs && isApplicableUrl(abs)) {
-          const fixed = ensureParamValue(abs);
-          if (fixed) {
-            // Передаем относительный путь, чтобы не нарушать same-origin требования
-            const path = toSameOriginPath(fixed);
-            if (path) nextUrlArg = path;
-          }
-        }
-      } catch (_) {}
-      return originalPushState.call(history, state, title, nextUrlArg);
-    };
-
-    history.replaceState = function(state, title, url) {
-      let nextUrlArg = url;
-      try {
-        const abs = url ? toAbsolute(url) : location.href;
-        if (abs && isApplicableUrl(abs)) {
-          const fixed = ensureParamValue(abs);
-          if (fixed) {
-            const path = toSameOriginPath(fixed);
-            if (path) nextUrlArg = path;
-          }
-        }
-      } catch (_) {}
-      return originalReplaceState.call(history, state, title, nextUrlArg);
-    };
 
     window.addEventListener('popstate', () => {
       // После back/forward убедимся, что параметр корректный
